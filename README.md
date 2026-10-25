@@ -16,7 +16,7 @@
 3. 启用：
    - `Require a pull request before merging`
    - `Require status checks to pass before merging`
-   - 选择检查项，例如：`lint`、`test`、`build`
+   - 选择检查项：`lint`、`test`、`build`（对应 `ci.yml` 中的三个 job）
 4. 不启用：
    - `Require approvals`
    - `Require review from Code Owners`
@@ -58,6 +58,18 @@ pip install -r requirements.txt
 python -m app.main
 ```
 
+## 开发检查
+
+```bash
+pip install -r requirements-dev.txt
+black --check .
+ruff check .
+pytest -q
+python -m compileall app
+```
+
+这些命令与 CI 中的 `lint`、`test`、`build` 三个检查一致。
+
 ## 项目结构
 
 ```text
@@ -69,13 +81,18 @@ python -m app.main
 │   ├── __init__.py
 │   └── main.py
 ├── tests/
+│   ├── conftest.py
 │   └── test_app.py
 ├── .gitignore
+├── LICENSE
 ├── README.md
 ├── pyproject.toml
 ├── requirements.txt
-└──
+└── requirements-dev.txt
 ```
+
+`app/main.py` 提供主窗口、打开/导出功能；`tests/` 中的测试默认使用 Qt 的
+`offscreen` 平台，无需显示器即可运行。
 
 ## CI 工作流说明
 
