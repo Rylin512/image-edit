@@ -96,6 +96,15 @@ QToolButton:checked {
 QToolButton:disabled {
     background-color: transparent;
 }
+QToolButton#crop_menu_button {
+    padding: 5px 4px;
+    border-radius: 6px;
+}
+QToolButton#crop_menu_button::menu-indicator {
+    image: none;
+    width: 0px;
+    height: 0px;
+}
 
 QStatusBar {
     background-color: #15181e;
@@ -214,6 +223,34 @@ QPushButton#empty_open_button:hover {
 QPushButton#empty_open_button:pressed {
     background-color: #3560bf;
     border-color: #5b8cff;
+}
+QPushButton#crop_apply {
+    background-color: #3f6fd8;
+    border: 1px solid #6d97ff;
+    border-radius: 8px;
+    color: #ffffff;
+    padding: 7px 18px;
+    min-width: 84px;
+    font-weight: 600;
+}
+QPushButton#crop_apply:hover {
+    background-color: #4d7ee8;
+    border-color: #8cacff;
+}
+QPushButton#crop_apply:pressed {
+    background-color: #3560bf;
+}
+QPushButton#crop_cancel {
+    background-color: rgba(18, 22, 30, 215);
+    border: 1px solid #3a4354;
+    border-radius: 8px;
+    color: #dfe5ef;
+    padding: 7px 16px;
+    min-width: 64px;
+}
+QPushButton#crop_cancel:hover {
+    background-color: #262d3a;
+    border-color: #4a556a;
 }
 
 QMessageBox QLabel {
