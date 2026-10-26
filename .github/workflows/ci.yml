@@ -60,4 +60,4 @@ jobs:
         with:
           python-version: "3.11"
       - name: Compile check
-        run: python -m compileall app
+        run: python -m compileall app scripts

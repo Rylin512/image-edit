@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Keep the PyInstaller spec; the Python template ignores *.spec
+!packaging/*.spec
