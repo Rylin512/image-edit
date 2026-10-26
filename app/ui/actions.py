@@ -72,6 +72,16 @@ class ActionRegistry:
         self._menus[key] = menu
         return menu
 
+    def create_submenu(self, key: str, title: str, parent: QMenu) -> QMenu:
+        if key in self._menus:
+            raise KeyError(f"Menu already created: {key}")
+        menu = parent.addMenu(title)
+        self._menus[key] = menu
+        return menu
+
+    def menu(self, key: str) -> QMenu:
+        return self._menus[key]
+
     def add(self, menu_key: str, *action_keys: str) -> None:
         menu = self._menus[menu_key]
         for key in action_keys:

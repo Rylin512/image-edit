@@ -1,8 +1,8 @@
 # image-edit
 
-基于 Python + PySide6 的桌面图片编辑器**基础平台**。
+基于 Python + PySide6 的桌面图片编辑器。
 
-当前版本只做“地基”：文档模型、撤销/重做（最多 20 步）、缩放画布、原子保存、EXIF 方向校正、动作注册表、日志、设置持久化，以及 Windows 一键启动与打包流程。裁剪、滤镜、图层等编辑功能留待后续按统一方式接入，不在本版本中。
+当前版本包含：文档模型、撤销/重做（最多 20 步）、平滑缩放与平移画布、旋转与镜像、自由裁剪和常用比例裁剪、原子保存、EXIF 方向校正、动作注册表、日志、设置持久化，以及 Windows 一键启动与打包流程。滤镜、图层等更多编辑功能继续通过统一的纯函数 + 撤销命令方式接入。
 
 ## 设计原则
 
@@ -38,10 +38,12 @@ python -m app
 │   ├── application.py       # QApplication、日志、异常钩子、主题
 │   ├── core/
 │   │   ├── document.py      # ImageDocument：图片 + 路径 + 脏标记 + 原子保存/EXIF 方向
-│   │   └── commands.py      # QUndoStack 图像操作封装
+│   │   ├── commands.py      # QUndoStack 图像操作封装
+│   │   └── image_ops.py     # 纯函数：旋转/镜像/裁剪
 │   ├── ui/
-│   │   ├── main_window.py   # 菜单、工具栏、状态栏、文件读写
-│   │   ├── canvas.py        # QGraphicsView 画布：缩放/平移/动画/坐标
+│   │   ├── main_window.py   # 菜单、工具栏、状态栏、文件读写、编辑动作
+│   │   ├── canvas.py        # QGraphicsView 画布：缩放/平移/动画/坐标/裁剪模式
+│   │   ├── crop.py          # 裁剪遮罩：选区、控制点、比例锁定、应用/取消
 │   │   ├── actions.py       # ActionRegistry：声明式动作/菜单注册
 │   │   ├── icons.py         # QPainter 绘制的多倍率线性图标
 │   │   └── theme.py         # 深色主题、QSS、Windows 深色标题栏
@@ -50,7 +52,7 @@ python -m app
 │   │   ├── logging.py       # 滚动日志（%LOCALAPPDATA%\Rylin512\ImageEdit\logs）
 │   │   └── paths.py         # 数据目录 / PyInstaller 资源路径
 │   └── resources/           # icon.png / icon.ico
-├── tests/                   # 文档、命令、画布、主窗口测试
+├── tests/                   # 文档、命令、图像操作、裁剪、画布、主窗口测试
 ├── scripts/
 │   ├── launch.py            # run.bat 的引导逻辑
 │   └── make_icon.py         # 生成图标（PNG + 多尺寸 ICO）
@@ -69,20 +71,30 @@ python -m app
 | 对象 | 职责 |
 | --- | --- |
 | `ImageDocument` | 持有 `QImage`、路径、脏标记；原子保存、EXIF 方向校正；`imageChanged/pathChanged/modifiedChanged` 信号 |
-| `CanvasView` | 显示图片；滚轮以光标为锚点缓动缩放，左键/中键拖拽平移，打开图片淡入，拖放高亮 |
+| `CanvasView` | 显示图片；滚轮以光标为锚点缓动缩放，左键/中键拖拽平移，打开图片淡入，拖放高亮；提供裁剪模式 |
+| `CropOverlay` | 覆盖在视口上的裁剪选区，支持拖动新建、移动、八向缩放和比例锁定，带尺寸/快捷键提示 |
+| `image_ops` | 无状态的 `QImage -> QImage` 旋转、镜像、裁剪函数，可直接测试和复用 |
 | `ImageOperationCommand` | 把 `QImage -> QImage` 操作变成可撤销命令，只保留一份“操作前”快照 |
-| `ActionRegistry` | 创建/登记 `QAction`，再声明式挂到菜单和工具栏 |
+| `ActionRegistry` | 创建/登记 `QAction`，再声明式挂到菜单、子菜单和工具栏 |
 | `MainWindow` | 组装以上对象，负责打开/保存/关闭确认/窗口状态持久化 |
 
 ### 界面与动画
 
 - **主题**：Fusion + 深色调色板 + QSS；工具按钮、菜单、状态栏统一圆角和悬停态。Windows 10/11 上同时把原生标题栏切换为深色。
-- **图标**：`icons.py` 用 `QPainter` 直接绘制打开/保存/撤销/重做/缩放/适应等线性图标，按 1x/2x/3x 生成，不需要外部图片资源。
+- **图标**：`icons.py` 用 `QPainter` 直接绘制打开/保存/撤销/重做/缩放/适应/旋转/镜像/裁剪等线性图标，按 1x/2x/3x 生成，不需要外部图片资源。
 - **过渡**：滚轮缩放 90ms、按钮缩放 160ms、打开图片淡入 180ms、拖放提示 150ms，全部使用 `OutCubic` 缓动。
 - **平滑缩放**：画布隐藏原生滚动条，改用图像项的浮点变换定位；缩放锚点和高 DPI 下的位移都不受滚动条整像素取整影响。
 - **空状态**：没有图片时在画布上绘制图标、标题和操作提示；拖入文件时显示虚线高亮。
 
 动画只改 `QGraphicsPixmapItem` 的变换和透明度，不会在每一帧重新处理 `QImage`。测试和截图可以用 `canvas.finish_animations()` 直接跳到动画终点。
+
+### 图像编辑
+
+- **旋转**：向左/向右 90°，另有 180°；使用 90° 整数倍变换，不重采样像素。
+- **镜像**：水平、垂直翻转。
+- **裁剪**：`图像 → 裁剪` 子菜单把“自由裁剪”和常用比例（1:1、4:3、3:4、3:2、2:3、16:9、9:16）放在一起；工具栏上自由裁剪按钮与右侧的比例下拉按钮相邻排列，点击主体直接自由裁剪，点击箭头选择比例。
+- **裁剪交互**：进入裁剪会自动适应窗口；拖动选区内部移动，拖动控制点缩放，在空白处拖动可新建选区；比例模式只显示四角控制点。`Enter` 应用、`Esc` 取消，也可以使用画布右下角的按钮；方向键微调选区（`Shift` 加速）。
+- 所有编辑都通过 `MainWindow.apply_operation` 进入同一个撤销栈，裁剪和旋转可连续撤销/重做。
 
 ## 扩展指南
 
@@ -118,16 +130,16 @@ window.actions.add("edit", "edit.invert")   # 追加到“编辑”菜单
 
 新动作的启用/禁用状态需要功能模块自己维护；内置动作的启用逻辑在 `MainWindow._update_action_states()`。
 
-### 添加画布工具（后续）
+### 添加画布工具
 
-`CanvasView` 已经把缩放、平移、坐标映射隔离好了。后续工具可以：
+`CanvasView` 已经把缩放、平移、坐标映射隔离好了，`ui/crop.py` 是一个可参考的完整示例：
 
-- 继承 `CanvasView` 或在其上叠加 `QGraphicsItem`（裁剪框、控制点）；
+- 工具可以是视口的子控件（裁剪遮罩）或 `QGraphicsItem`；子控件能直接使用普通 `QWidget` 按钮和光标。
 - 使用 `cursorPositionChanged` 获取图片像素坐标；
 - 用 `view_to_image()`、`image_to_view()` 和 `image_rect()` 在视口与图片坐标之间转换；
-- 在 `mousePressEvent/mouseMoveEvent` 中实现交互，完成后仍然通过 `apply_operation` 提交修改，从而自动获得撤销能力。
+- 工具激活时拦截鼠标事件，画布本身的左键平移就不会启动；完成后仍然通过 `apply_operation` 提交修改，从而自动获得撤销能力。
 
-注意：当前左键拖动默认用于平移。接入画笔/选框等工具后，需要在工具激活时关闭左键平移（例如增加 `left_drag_pans` 开关），把左键事件交给工具处理。
+如果新工具不需要覆盖整个视口，也可以给 `CanvasView` 增加类似 `_crop_active` 的状态，在 `mousePressEvent` 中把左键交给工具而不是平移。
 
 ### 添加自定义命令
 
@@ -162,7 +174,7 @@ winget install -e --id JRSoftware.InnoSetup
 powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1
 ```
 
-产物：`dist\ImageEdit-Setup-0.1.0.exe`。默认按当前用户安装到 `%LOCALAPPDATA%\Programs\Image Edit`，无需管理员权限，带开始菜单快捷方式和可选桌面图标。安装包和 `pyproject.toml` 都从 `app.__version__` 读取版本号，只需修改一处。
+产物：`dist\ImageEdit-Setup-0.2.0.exe`。默认按当前用户安装到 `%LOCALAPPDATA%\Programs\Image Edit`，无需管理员权限，带开始菜单快捷方式和可选桌面图标。安装包和 `pyproject.toml` 都从 `app.__version__` 读取版本号，只需修改一处。
 
 > 未签名的 exe 首次运行可能触发 Windows SmartScreen 提示；正式分发需要代码签名证书。
 
@@ -196,8 +208,8 @@ python -m compileall app scripts tests
 
 ## 后续路线
 
-1. 画布交互工具框架（选择框、画笔、取色）
-2. 裁剪、旋转、调整大小
+1. 画布交互工具框架（画笔、形状、取色）
+2. 调整图像大小、画布尺寸
 3. 色彩、亮度、对比度调节
 4. 图层管理
 5. 撤销/重做粒度优化（增量快照）

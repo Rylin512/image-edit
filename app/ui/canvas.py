@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     QEasingCurve,
     QPoint,
     QPointF,
+    QRect,
     QRectF,
     Qt,
     QVariantAnimation,
@@ -45,6 +46,8 @@ from PySide6.QtWidgets import (
     QPushButton,
 )
 
+from app.ui.crop import CropOverlay
+
 
 class CanvasView(QGraphicsView):
     """Displays one image with smooth zoom, pan and cursor coordinates."""
@@ -52,6 +55,8 @@ class CanvasView(QGraphicsView):
     zoomChanged = Signal(float)  # percentage, 0 when no image is shown
     cursorPositionChanged = Signal(object)  # QPointF in image pixels or None
     openRequested = Signal()
+    cropAccepted = Signal(QRect)
+    cropCancelled = Signal()
 
     MIN_ZOOM = 0.01
     MAX_ZOOM = 32.0
@@ -104,6 +109,7 @@ class CanvasView(QGraphicsView):
         self._pan_origin = QPointF()
         self._drop_active = False
         self._drop_alpha = 0.0
+        self._crop_active = False
         self._grid_brush = self._make_grid_brush()
 
         self._zoom_animation = QVariantAnimation(self)
@@ -129,6 +135,10 @@ class CanvasView(QGraphicsView):
         self._open_button.clicked.connect(self.openRequested.emit)
         self._update_open_button()
 
+        self._crop_overlay = CropOverlay(self.viewport(), self)
+        self._crop_overlay.accepted.connect(self._on_crop_accepted)
+        self._crop_overlay.cancelled.connect(self._on_crop_cancelled)
+
     @property
     def zoom_factor(self) -> float:
         return self._zoom
@@ -140,6 +150,10 @@ class CanvasView(QGraphicsView):
     @property
     def has_image(self) -> bool:
         return not self._pixmap_item.pixmap().isNull()
+
+    @property
+    def is_cropping(self) -> bool:
+        return self._crop_active
 
     def view_to_image(self, view_pos: QPointF | QPoint) -> QPointF:
         """Map a viewport position to image pixels, keeping sub-pixel accuracy."""
@@ -156,6 +170,45 @@ class CanvasView(QGraphicsView):
     def image_rect(self) -> QRectF:
         """The displayed image bounds in image pixels."""
         return QRectF(self._pixmap_item.boundingRect())
+
+    # -- cropping --------------------------------------------------------
+    def begin_crop(self, aspect_ratio: float | None = None) -> None:
+        """Fit the image and show the crop overlay.
+
+        ``aspect_ratio`` locks width / height; ``None`` enables free cropping.
+        """
+        if not self.has_image:
+            return
+        self._panning = False
+        self.finish_animations()
+        self._fit_now()
+        self._crop_active = True
+        self._crop_overlay.start(aspect_ratio)
+
+    def cancel_crop(self) -> None:
+        if self._crop_active:
+            self._crop_overlay.cancel()
+
+    def accept_crop(self) -> None:
+        if self._crop_active:
+            self._crop_overlay.accept_crop()
+
+    def crop_rect(self) -> QRect:
+        """The crop selection in image pixels, or an empty rect."""
+        return self._crop_overlay.crop_rect()
+
+    def _on_crop_accepted(self, rect: QRect) -> None:
+        self._finish_crop()
+        self.cropAccepted.emit(rect)
+
+    def _on_crop_cancelled(self) -> None:
+        self._finish_crop()
+        self.cropCancelled.emit()
+
+    def _finish_crop(self) -> None:
+        self._crop_active = False
+        self._update_cursor()
+        self.setFocus()
 
     def advance_zoom_animation(self, fraction: float) -> None:
         """Jump within a running zoom animation (tests, screenshots)."""
@@ -175,6 +228,8 @@ class CanvasView(QGraphicsView):
         if image.isNull():
             self.clear_image()
             return
+        if self._crop_active:
+            self.cancel_crop()
 
         pixmap = QPixmap.fromImage(image)
         if pixmap.isNull():
@@ -197,6 +252,8 @@ class CanvasView(QGraphicsView):
         self.viewport().update()
 
     def clear_image(self) -> None:
+        if self._crop_active:
+            self.cancel_crop()
         self._zoom_animation.stop()
         self._opacity_animation.stop()
         self._pixmap_item.setPixmap(QPixmap())
@@ -500,6 +557,9 @@ class CanvasView(QGraphicsView):
                 self._apply_camera(self._zoom, self._center)
         if not self.has_image and not self._drop_active:
             self._position_open_button()
+        if self._crop_active:
+            self._crop_overlay.setGeometry(self.viewport().rect())
+            self._crop_overlay.update()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -507,6 +567,9 @@ class CanvasView(QGraphicsView):
             self._position_open_button()
 
     def wheelEvent(self, event: QWheelEvent) -> None:
+        if self._crop_active:
+            event.accept()
+            return
         if not self.has_image:
             event.accept()
             return

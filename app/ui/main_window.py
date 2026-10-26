@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, QSize, Qt
+from PySide6.QtCore import QByteArray, QRect, QSettings, QSize, Qt
 from PySide6.QtGui import (
     QCloseEvent,
     QDragEnterEvent,
@@ -20,13 +20,23 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QToolBar,
+    QToolButton,
 )
 
 from app import __version__
 from app.core.commands import ImageOperationCommand, apply_image_operation
 from app.core.document import ImageDocument
+from app.core.image_ops import (
+    crop_image,
+    flip_horizontal,
+    flip_vertical,
+    rotate_180,
+    rotate_left,
+    rotate_right,
+)
 from app.ui.actions import ActionRegistry
 from app.ui.canvas import CanvasView
 from app.ui.icons import make_icon
@@ -39,6 +49,18 @@ from app.utils.files import (
     suffix_from_filter,
 )
 from app.utils.paths import resource_path
+
+# Key, menu label, width / height. Keeping the presets in one place lets the
+# crop menu and the toolbar drop-down stay in sync.
+CROP_RATIOS: tuple[tuple[str, str, float], ...] = (
+    ("image.crop.1_1", "1:1 方形", 1.0),
+    ("image.crop.4_3", "4:3 横向", 4.0 / 3.0),
+    ("image.crop.3_4", "3:4 竖向", 3.0 / 4.0),
+    ("image.crop.3_2", "3:2 横向", 3.0 / 2.0),
+    ("image.crop.2_3", "2:3 竖向", 2.0 / 3.0),
+    ("image.crop.16_9", "16:9 宽屏", 16.0 / 9.0),
+    ("image.crop.9_16", "9:16 竖屏", 9.0 / 16.0),
+)
 
 
 class MainWindow(QMainWindow):
@@ -54,6 +76,7 @@ class MainWindow(QMainWindow):
         self._undo_stack.setUndoLimit(self.UNDO_LIMIT)
         self._actions = ActionRegistry(self)
         self._titlebar_themed = False
+        self._crop_menu_button: QToolButton | None = None
 
         self.setMinimumSize(760, 500)
         self._canvas = CanvasView(self)
@@ -267,6 +290,69 @@ class MainWindow(QMainWindow):
         registry.register("edit.redo", redo)
 
         registry.create(
+            "image.rotate_left",
+            "向左旋转 90°",
+            slot=lambda: self._apply_transform("向左旋转 90°", rotate_left),
+            shortcut=QKeySequence("Ctrl+Alt+L"),
+            status_tip="将图像逆时针旋转 90°",
+            icon_text="左旋",
+            icon="rotate_left",
+        )
+        registry.create(
+            "image.rotate_right",
+            "向右旋转 90°",
+            slot=lambda: self._apply_transform("向右旋转 90°", rotate_right),
+            shortcut=QKeySequence("Ctrl+Alt+R"),
+            status_tip="将图像顺时针旋转 90°",
+            icon_text="右旋",
+            icon="rotate_right",
+        )
+        registry.create(
+            "image.rotate_180",
+            "旋转 180°",
+            slot=lambda: self._apply_transform("旋转 180°", rotate_180),
+            status_tip="将图像旋转半圈",
+        )
+        registry.create(
+            "image.flip_horizontal",
+            "水平镜像",
+            slot=lambda: self._apply_transform("水平镜像", flip_horizontal),
+            shortcut=QKeySequence("Ctrl+Alt+H"),
+            status_tip="沿垂直轴镜像图像",
+            icon_text="水平镜像",
+            icon="flip_horizontal",
+        )
+        registry.create(
+            "image.flip_vertical",
+            "垂直镜像",
+            slot=lambda: self._apply_transform("垂直镜像", flip_vertical),
+            shortcut=QKeySequence("Ctrl+Alt+V"),
+            status_tip="沿水平轴镜像图像",
+            icon_text="垂直镜像",
+            icon="flip_vertical",
+        )
+
+        registry.create(
+            "image.crop.free",
+            "自由裁剪(&F)",
+            slot=lambda: self._begin_crop(None),
+            shortcut="C",
+            status_tip="拖动选择裁剪区域",
+            icon_text="裁剪",
+            icon="crop",
+        )
+        for key, label, ratio in CROP_RATIOS:
+            registry.create(
+                key,
+                label,
+                # QAction.triggered(bool) supplies the checked flag, so consume
+                # it explicitly; otherwise it would overwrite the captured ratio
+                # and start the crop with an aspect of 0.
+                slot=lambda _checked=False, aspect=ratio: self._begin_crop(aspect),
+                status_tip=f"按 {label} 比例裁剪",
+            )
+
+        registry.create(
             "view.zoom_in",
             "放大",
             slot=self._zoom_in,
@@ -321,6 +407,17 @@ class MainWindow(QMainWindow):
         registry.create_menu("edit", "编辑(&E)", menubar)
         registry.add("edit", "edit.undo", "edit.redo")
 
+        image_menu = registry.create_menu("image", "图像(&I)", menubar)
+        registry.create_submenu("image.rotate", "旋转", image_menu)
+        registry.add("image.rotate", "image.rotate_left", "image.rotate_right", "image.rotate_180")
+        registry.create_submenu("image.mirror", "镜像", image_menu)
+        registry.add("image.mirror", "image.flip_horizontal", "image.flip_vertical")
+
+        registry.create_submenu("image.crop", "裁剪", image_menu)
+        registry.add("image.crop", "image.crop.free")
+        registry.add_separator("image.crop")
+        registry.add("image.crop", *(key for key, _, _ in CROP_RATIOS))
+
         registry.create_menu("view", "视图(&V)", menubar)
         registry.add("view", "view.zoom_in", "view.zoom_out")
         registry.add_separator("view")
@@ -342,8 +439,44 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         self._actions.add_to_toolbar(toolbar, "edit.undo", "edit.redo")
         toolbar.addSeparator()
+        self._actions.add_to_toolbar(
+            toolbar,
+            "image.rotate_left",
+            "image.rotate_right",
+            "image.flip_horizontal",
+            "image.flip_vertical",
+        )
+        self._add_crop_button(toolbar)
+        toolbar.addSeparator()
         self._actions.add_to_toolbar(toolbar, "view.zoom_out", "view.zoom_in", "view.fit")
         self.addToolBar(toolbar)
+
+    def _add_crop_button(self, toolbar: QToolBar) -> None:
+        """A free-crop button plus a separate ratio menu button.
+
+        Qt's MenuButtonPopup squeezes the icon and menu indicator into one
+        native control, which clipped the crop glyph at this toolbar size.
+        Two adjacent buttons keep both hit areas clear.
+        """
+        self._actions.add_to_toolbar(toolbar, "image.crop.free")
+
+        menu = QMenu(self)
+        menu.addAction(self._actions.action("image.crop.free"))
+        menu.addSeparator()
+        for key, _, _ in CROP_RATIOS:
+            menu.addAction(self._actions.action(key))
+
+        button = QToolButton(toolbar)
+        button.setObjectName("crop_menu_button")
+        button.setIcon(make_icon("chevron_down"))
+        button.setIconSize(QSize(12, 12))
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        button.setMenu(menu)
+        button.setFixedSize(22, 32)
+        button.setToolTip("选择常用裁剪比例")
+        toolbar.addWidget(button)
+        self._crop_menu_button = button
 
     def _build_status_bar(self) -> None:
         self._cursor_label = QLabel("")
@@ -372,6 +505,8 @@ class MainWindow(QMainWindow):
         self._canvas.zoomChanged.connect(self._on_zoom_changed)
         self._canvas.cursorPositionChanged.connect(self._on_cursor_changed)
         self._canvas.openRequested.connect(self.open_image)
+        self._canvas.cropAccepted.connect(self._on_crop_accepted)
+        self._canvas.cropCancelled.connect(self._on_crop_cancelled)
 
     # -- signal handlers -------------------------------------------------
     def _on_image_changed(self) -> None:
@@ -406,13 +541,46 @@ class MainWindow(QMainWindow):
     def _fit_to_window(self) -> None:
         self._canvas.fit_to_window()
 
+    # -- image actions ---------------------------------------------------
+    def _apply_transform(self, text: str, operation: Callable[[QImage], QImage]) -> None:
+        if self.apply_operation(text, operation) is not None:
+            self.statusBar().showMessage(f"{text}完成", 2500)
+
+    def _begin_crop(self, aspect_ratio: float | None) -> None:
+        if self._document.is_empty:
+            self.statusBar().showMessage("请先打开一张图片", 3000)
+            return
+        self._canvas.begin_crop(aspect_ratio)
+        self.statusBar().showMessage(
+            "拖动裁剪框，按 Enter 应用，Esc 取消",
+            6000,
+        )
+
+    def _on_crop_accepted(self, rect: QRect) -> None:
+        image = self._document.image
+        target = rect.normalized().intersected(image.rect())
+        if target.isEmpty():
+            self.statusBar().showMessage("裁剪区域无效", 3000)
+            return
+        if target == image.rect():
+            self.statusBar().showMessage("裁剪区域与图像相同，未做修改", 3000)
+            return
+        if self.apply_operation("裁剪", lambda source: crop_image(source, target)) is not None:
+            self.statusBar().showMessage(
+                f"已裁剪为 {target.width()} × {target.height()}",
+                4000,
+            )
+
+    def _on_crop_cancelled(self) -> None:
+        self.statusBar().showMessage("已取消裁剪", 2500)
+
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
             "关于 Image Edit",
             f"<h3>Image Edit {__version__}</h3>"
-            "<p>基于 PySide6 的桌面图片编辑器基础平台。</p>"
-            "<p>文档模型、撤销栈和缩放画布已经就位；"
+            "<p>基于 PySide6 的桌面图片编辑器。</p>"
+            "<p>支持平滑缩放平移、旋转、镜像以及自由和常用比例裁剪；"
             "新功能可以通过 apply_operation 和动作注册表接入。</p>",
         )
 
@@ -434,12 +602,21 @@ class MainWindow(QMainWindow):
         for key in (
             "file.save",
             "file.save_as",
+            "image.rotate_left",
+            "image.rotate_right",
+            "image.rotate_180",
+            "image.flip_horizontal",
+            "image.flip_vertical",
+            "image.crop.free",
+            *[key for key, _, _ in CROP_RATIOS],
             "view.zoom_in",
             "view.zoom_out",
             "view.actual_size",
             "view.fit",
         ):
             self._actions.action(key).setEnabled(has_image)
+        if self._crop_menu_button is not None:
+            self._crop_menu_button.setEnabled(has_image)
 
     def _restore_window_state(self) -> None:
         geometry = self._settings.value("window/geometry", QByteArray())
