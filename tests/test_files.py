@@ -1,4 +1,8 @@
-from app.utils.files import is_supported_image, suffix_from_filter
+from __future__ import annotations
+
+from pathlib import Path
+
+from app.utils.files import is_supported_image, save_format_for_path, suffix_from_filter
 
 
 def test_suffix_from_filter() -> None:
@@ -14,3 +18,12 @@ def test_is_supported_image() -> None:
     assert is_supported_image("photo.webp")
     assert not is_supported_image("notes.txt")
     assert not is_supported_image("archive.zip")
+
+
+def test_save_format_for_path() -> None:
+    assert save_format_for_path("photo.png") == "png"
+    assert save_format_for_path(Path("photo.JPG")) == "jpeg"
+    assert save_format_for_path("photo.jpeg") == "jpeg"
+    assert save_format_for_path("photo.tif") == "tiff"
+    assert save_format_for_path("notes.txt") is None
+    assert save_format_for_path("no_extension") is None

@@ -38,14 +38,12 @@ def settle(canvas: CanvasView) -> None:
 
 def image_origin(canvas: CanvasView) -> QPoint:
     """Viewport position of the image's top-left corner."""
-    scene_pos = canvas._pixmap_item.mapToScene(QPointF(0, 0))
-    return canvas.mapFromScene(scene_pos)
+    return canvas.image_to_view(QPointF(0, 0)).toPoint()
 
 
 def image_center_in_view(canvas: CanvasView) -> QPoint:
     """Viewport position of the image's center."""
-    center = canvas._pixmap_item.boundingRect().center()
-    return canvas.mapFromScene(canvas._pixmap_item.mapToScene(center))
+    return canvas.image_to_view(canvas.image_rect().center()).toPoint()
 
 
 def test_empty_canvas(qapp: QApplication) -> None:
@@ -177,14 +175,14 @@ def test_zoom_animation_keeps_the_anchor_still(qapp: QApplication) -> None:
     canvas.resize(500, 400)
     canvas.set_image(make_image(1600, 1200), reset_view=True)
     cursor = QPointF(380, 290)
-    anchor_before = canvas._view_to_image(cursor)
+    anchor_before = canvas.view_to_image(cursor)
     before = canvas.zoom_factor
 
     canvas.zoom_by(1.6, view_pos=cursor)
     assert canvas.is_zooming
     for fraction in (0.15, 0.4, 0.7, 0.95):
-        canvas._zoom_animation.setCurrentTime(int(canvas._zoom_animation.duration() * fraction))
-        anchor_now = canvas._view_to_image(cursor)
+        canvas.advance_zoom_animation(fraction)
+        anchor_now = canvas.view_to_image(cursor)
         assert anchor_now.x() == pytest.approx(anchor_before.x(), abs=0.25)
         assert anchor_now.y() == pytest.approx(anchor_before.y(), abs=0.25)
 
@@ -210,7 +208,7 @@ def test_fit_slides_a_panned_image_back_to_the_center(qapp: QApplication) -> Non
     assert panned != canvas.viewport().rect().center()
 
     canvas.fit_to_window()
-    canvas._zoom_animation.setCurrentTime(1)
+    canvas.advance_zoom_animation(0.01)
     early = image_center_in_view(canvas)
     # The image slides toward the center instead of jumping there on frame 1.
     assert abs(early.x() - panned.x()) < 20

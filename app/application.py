@@ -16,10 +16,20 @@ from app.utils.paths import app_data_dir
 
 APP_NAME = "ImageEdit"
 ORG_NAME = "Rylin512"
+MIN_PYTHON = (3, 12)
+
+
+def ensure_supported_python(version_info: tuple[int, ...] | None = None) -> None:
+    """Fail early with a readable message on an unsupported interpreter."""
+    info = sys.version_info if version_info is None else version_info
+    if info < MIN_PYTHON:
+        found = ".".join(str(part) for part in info[:2])
+        raise SystemExit(f"Image Edit 需要 Python 3.12 或更高版本（当前为 {found}）。")
 
 
 def create_application(argv: list[str]) -> QApplication:
     """Create the QApplication with the settings Qt needs for QSettings."""
+    ensure_supported_python()
     QCoreApplication.setOrganizationName(ORG_NAME)
     QCoreApplication.setApplicationName(APP_NAME)
     QCoreApplication.setApplicationVersion(__version__)

@@ -17,6 +17,13 @@ ROOT = Path(__file__).resolve().parent.parent
 VENV_DIR = ROOT / ".venv"
 REQUIREMENTS = ROOT / "requirements.txt"
 STAMP = VENV_DIR / ".requirements.sha256"
+MIN_PYTHON = (3, 12)
+
+
+def ensure_supported_python() -> None:
+    if sys.version_info < MIN_PYTHON:
+        found = ".".join(str(part) for part in sys.version_info[:3])
+        raise SystemExit(f"Image Edit 需要 Python 3.12 或更高版本（当前为 {found}）。")
 
 
 def venv_python() -> Path:
@@ -68,6 +75,7 @@ def ensure_environment() -> Path:
 
 
 def launch() -> int:
+    ensure_supported_python()
     ensure_environment()
     arguments = sys.argv[1:]
 

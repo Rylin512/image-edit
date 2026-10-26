@@ -20,6 +20,15 @@ IMAGE_SAVE_FILTER = (
 SUPPORTED_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif", ".tif", ".tiff"})
 
 _SUFFIX_PATTERN = re.compile(r"\*(\.[0-9A-Za-z]+)")
+_SAVE_FORMATS = {
+    ".png": "png",
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".webp": "webp",
+    ".bmp": "bmp",
+    ".tif": "tiff",
+    ".tiff": "tiff",
+}
 
 
 def suffix_from_filter(selected_filter: str) -> str:
@@ -30,3 +39,8 @@ def suffix_from_filter(selected_filter: str) -> str:
 
 def is_supported_image(path: str | Path) -> bool:
     return Path(path).suffix.lower() in SUPPORTED_SUFFIXES
+
+
+def save_format_for_path(path: str | Path) -> str | None:
+    """Return the Qt image format for a save path, or None if unsupported."""
+    return _SAVE_FORMATS.get(Path(path).suffix.lower())

@@ -141,6 +141,29 @@ class CanvasView(QGraphicsView):
     def has_image(self) -> bool:
         return not self._pixmap_item.pixmap().isNull()
 
+    def view_to_image(self, view_pos: QPointF | QPoint) -> QPointF:
+        """Map a viewport position to image pixels, keeping sub-pixel accuracy."""
+        if self._zoom <= 0.0:
+            return QPointF()
+        return self._center + (QPointF(view_pos) - self._viewport_center()) / self._zoom
+
+    def image_to_view(self, image_pos: QPointF | QPoint) -> QPointF:
+        """Map a position in image pixels to viewport coordinates."""
+        if not self.has_image:
+            return QPointF()
+        return QPointF(self.mapFromScene(self._pixmap_item.mapToScene(QPointF(image_pos))))
+
+    def image_rect(self) -> QRectF:
+        """The displayed image bounds in image pixels."""
+        return QRectF(self._pixmap_item.boundingRect())
+
+    def advance_zoom_animation(self, fraction: float) -> None:
+        """Jump within a running zoom animation (tests, screenshots)."""
+        if not self.is_zooming:
+            return
+        duration = self._zoom_animation.duration()
+        self._zoom_animation.setCurrentTime(int(duration * max(0.0, min(1.0, fraction))))
+
     # -- image lifecycle -------------------------------------------------
     def set_image(self, image: QImage, *, reset_view: bool = False) -> None:
         """Show ``image``.
@@ -276,12 +299,6 @@ class CanvasView(QGraphicsView):
     def _image_center(self) -> QPointF:
         return self._pixmap_item.boundingRect().center()
 
-    def _view_to_image(self, view_pos: QPointF) -> QPointF:
-        """Map a viewport position to image pixels, keeping sub-pixel accuracy."""
-        if self._zoom <= 0.0:
-            return QPointF()
-        return self._center + (QPointF(view_pos) - self._viewport_center()) / self._zoom
-
     @staticmethod
     def _same_point(a: QPointF, b: QPointF) -> bool:
         return abs(a.x() - b.x()) < 1e-6 and abs(a.y() - b.y()) < 1e-6
@@ -307,7 +324,7 @@ class CanvasView(QGraphicsView):
         target = self._clamp_zoom(target)
         self._fit_mode = fit_mode
         if anchor_image is None:
-            anchor_image = self._view_to_image(anchor)
+            anchor_image = self.view_to_image(anchor)
 
         if fit_mode:
             target_center = self._clamped_center(self._image_center(), target)
@@ -573,7 +590,7 @@ class CanvasView(QGraphicsView):
         if not self.has_image:
             self.cursorPositionChanged.emit(None)
             return
-        image_pos = self._view_to_image(QPointF(view_pos))
+        image_pos = self.view_to_image(QPointF(view_pos))
         if self._pixmap_item.boundingRect().contains(image_pos):
             self.cursorPositionChanged.emit(image_pos)
         else:

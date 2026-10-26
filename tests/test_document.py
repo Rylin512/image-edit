@@ -60,6 +60,30 @@ def test_save_roundtrip_updates_path(sample_image_path: Path, tmp_path: Path) ->
     assert saved.load(str(target))
 
 
+def test_save_jpeg_roundtrip(sample_image_path: Path, tmp_path: Path) -> None:
+    document = ImageDocument()
+    assert document.load(sample_image_path)
+    target = tmp_path / "copy.jpg"
+
+    assert document.save(target)
+    assert document.path == target
+    saved = QImage()
+    assert saved.load(str(target))
+
+
+def test_save_unsupported_format_keeps_existing_file(
+    sample_image_path: Path, tmp_path: Path
+) -> None:
+    document = ImageDocument()
+    assert document.load(sample_image_path)
+    target = tmp_path / "notes.txt"
+    target.write_bytes(b"keep me")
+
+    assert not document.save(target)
+    assert target.read_bytes() == b"keep me"
+    assert document.path == sample_image_path
+
+
 def test_save_without_path_returns_false(sample_image: QImage) -> None:
     document = ImageDocument()
     document.replace_image(sample_image)

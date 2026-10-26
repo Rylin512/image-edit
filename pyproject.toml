@@ -1,6 +1,6 @@
 [project]
 name = "image-edit"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Extensible PySide6 desktop image editor foundation"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -10,15 +10,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "black>=24.4",
-    "ruff>=0.4",
+    "black==26.10.1",
+    "ruff==0.17.2",
     "pytest>=8.0",
 ]
 build = [
     "pyinstaller>=6.16",
 ]
 
-[project.scripts]
+[project.gui-scripts]
 image-edit = "app.main:main"
 
 [build-system]
@@ -27,6 +27,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "app.__version__"}
 
 [tool.setuptools.package-data]
 app = ["resources/*.png", "resources/*.ico"]

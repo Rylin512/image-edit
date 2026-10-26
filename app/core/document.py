@@ -5,10 +5,14 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QIODevice, QObject, QSaveFile, Signal
+from PySide6.QtGui import QImage, QImageReader
+
+from app.utils.files import save_format_for_path
 
 logger = logging.getLogger(__name__)
+
+JPEG_QUALITY = 92
 
 
 class ImageDocument(QObject):
@@ -49,11 +53,16 @@ class ImageDocument(QObject):
         return self._path.name if self._path is not None else "未命名"
 
     def load(self, path: str | Path) -> bool:
-        """Load an image from disk, leaving the document untouched on failure."""
+        """Load an image from disk, applying its EXIF orientation if present.
+
+        The document is left untouched when reading fails.
+        """
         target = Path(path)
-        image = QImage()
-        if not image.load(str(target)):
-            logger.warning("Could not load image: %s", target)
+        reader = QImageReader(str(target))
+        reader.setAutoTransform(True)
+        image = reader.read()
+        if image.isNull():
+            logger.warning("Could not load image: %s (%s)", target, reader.errorString())
             return False
 
         self._set_path(target)
@@ -70,15 +79,34 @@ class ImageDocument(QObject):
         self.set_modified(modified)
 
     def save(self, path: str | Path | None = None) -> bool:
-        """Write the current image to ``path`` (or the current path)."""
+        """Atomically write the current image to ``path`` (or the current path)."""
         if self._image.isNull():
             return False
 
         target = Path(path) if path is not None else self._path
         if target is None:
             return False
-        if not self._image.save(str(target)):
-            logger.warning("Could not save image: %s", target)
+
+        image_format = save_format_for_path(target)
+        if image_format is None:
+            logger.warning("Unsupported image format: %s", target)
+            return False
+
+        quality = JPEG_QUALITY if image_format in {"jpg", "jpeg"} else -1
+        output = QSaveFile(str(target))
+        if not output.open(QIODevice.OpenModeFlag.WriteOnly):
+            logger.warning(
+                "Could not open image for writing: %s (%s)", target, output.errorString()
+            )
+            return False
+
+        if not self._image.save(output, image_format, quality):
+            logger.warning("Could not save image: %s (%s)", target, output.errorString())
+            output.cancelWriting()
+            return False
+
+        if not output.commit():
+            logger.warning("Could not commit image: %s (%s)", target, output.errorString())
             return False
 
         self._set_path(target)

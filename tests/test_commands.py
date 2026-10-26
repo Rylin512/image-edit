@@ -51,3 +51,25 @@ def test_operation_must_return_an_image(sample_image_path: Path) -> None:
 
     with pytest.raises(ValueError):
         apply_image_operation(document, stack, "坏操作", lambda image: QImage())
+
+    assert not stack.canUndo()
+
+
+def test_operation_runs_once_for_the_initial_application(sample_image_path: Path) -> None:
+    document = ImageDocument()
+    assert document.load(sample_image_path)
+    stack = QUndoStack()
+    calls = 0
+
+    def operation(image: QImage) -> QImage:
+        nonlocal calls
+        calls += 1
+        image.invertPixels()
+        return image
+
+    assert apply_image_operation(document, stack, "反色", operation) is not None
+    assert calls == 1
+
+    stack.undo()
+    stack.redo()
+    assert calls == 2

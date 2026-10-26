@@ -35,6 +35,7 @@ from app.utils.files import (
     IMAGE_OPEN_FILTER,
     IMAGE_SAVE_FILTER,
     is_supported_image,
+    save_format_for_path,
     suffix_from_filter,
 )
 from app.utils.paths import resource_path
@@ -43,11 +44,14 @@ from app.utils.paths import resource_path
 class MainWindow(QMainWindow):
     """Shell that owns the document, undo stack and canvas."""
 
+    UNDO_LIMIT = 20
+
     def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
         self._settings = settings or QSettings()
         self._document = ImageDocument(self)
         self._undo_stack = QUndoStack(self)
+        self._undo_stack.setUndoLimit(self.UNDO_LIMIT)
         self._actions = ActionRegistry(self)
         self._titlebar_themed = False
 
@@ -96,7 +100,13 @@ class MainWindow(QMainWindow):
         return command
 
     def load_path(self, path: str | Path) -> bool:
-        """Load a file into the window without asking about unsaved changes."""
+        """Load a file into the window, asking before discarding edits."""
+        if not self._confirm_discard():
+            return False
+        return self._load_path_unchecked(path)
+
+    def _load_path_unchecked(self, path: str | Path) -> bool:
+        """Load a file after the caller has already handled unsaved changes."""
         target = Path(path)
         if not self._document.load(target):
             QMessageBox.warning(self, "打开失败", f"无法打开图片：\n{target}")
@@ -116,6 +126,13 @@ class MainWindow(QMainWindow):
             return False
 
         target = Path(path)
+        if save_format_for_path(target) is None:
+            QMessageBox.warning(
+                self,
+                "保存失败",
+                f"不支持的文件格式：\n{target}\n\n请使用 PNG、JPEG、WebP、BMP 或 TIFF。",
+            )
+            return False
         if not self._document.save(target):
             QMessageBox.warning(self, "保存失败", f"无法写入文件：\n{target}")
             return False
@@ -131,6 +148,8 @@ class MainWindow(QMainWindow):
             return False
         if self._document.path is None:
             return self.save_as()
+        if not self._confirm_jpeg_alpha(self._document.path):
+            return False
         return self.save_to(self._document.path)
 
     def save_as(self) -> bool:
@@ -151,7 +170,25 @@ class MainWindow(QMainWindow):
         target = Path(path)
         if not target.suffix:
             target = target.with_suffix(suffix_from_filter(selected_filter))
+        if not self._confirm_jpeg_alpha(target):
+            return False
         return self.save_to(target)
+
+    def _confirm_jpeg_alpha(self, target: Path) -> bool:
+        """Warn before flattening transparency into a JPEG."""
+        if target.suffix.lower() not in {".jpg", ".jpeg"}:
+            return True
+        if not self._document.image.hasAlphaChannel():
+            return True
+
+        answer = QMessageBox.question(
+            self,
+            "JPEG 透明通道",
+            "JPEG 不支持透明通道，透明区域会丢失。\n是否仍要保存？",
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        return answer == QMessageBox.StandardButton.Save
 
     def open_image(self) -> None:
         if not self._confirm_discard():
@@ -161,7 +198,7 @@ class MainWindow(QMainWindow):
             self, "打开图片", str(self._last_directory()), IMAGE_OPEN_FILTER
         )
         if path:
-            self.load_path(path)
+            self._load_path_unchecked(path)
 
     # -- construction ----------------------------------------------------
     def _install_icon(self) -> None:
@@ -475,7 +512,7 @@ class MainWindow(QMainWindow):
         if path is None or not self._confirm_discard():
             event.ignore()
             return
-        self.load_path(path)
+        self._load_path_unchecked(path)
         event.acceptProposedAction()
 
     @staticmethod
