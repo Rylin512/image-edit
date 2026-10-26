@@ -1,16 +1,38 @@
 [project]
-name = "image-edit-demo"
-version = "0.1.0"
-description = "Simple image editor demo with PySide6"
+name = "image-edit"
+dynamic = ["version"]
+description = "Extensible PySide6 desktop image editor foundation"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "PySide6>=6.7.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "black==26.10.1",
+    "ruff==0.17.2",
+    "pytest>=8.0",
+]
+build = [
+    "pyinstaller>=6.16",
+]
+
+[project.gui-scripts]
+image-edit = "app.main:main"
+
 [build-system]
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "app.__version__"}
+
+[tool.setuptools.package-data]
+app = ["resources/*.png", "resources/*.ico"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -18,10 +40,12 @@ testpaths = ["tests"]
 
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.ruff]
 line-length = 100
+target-version = "py312"
+extend-exclude = ["packaging"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
