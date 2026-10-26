@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -37,6 +38,23 @@ def cleanup_qt_widgets(qapp: QApplication) -> Iterator[None]:
         widget.deleteLater()
     QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     qapp.processEvents()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_qt_session(qapp: QApplication) -> Iterator[None]:
+    """Collect leftover Qt wrapper cycles before the interpreter shuts down.
+
+    Signal connections store bound methods, so widgets and their animations
+    form reference cycles. If those cycles survive until Python finalization,
+    shiboken may run deallocators after parts of Qt have already been torn
+    down, which aborts the process. Collecting here keeps the teardown ordered.
+    """
+    yield
+    for widget in QApplication.topLevelWidgets():
+        widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
+    gc.collect()
 
 
 @pytest.fixture()
