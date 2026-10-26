@@ -5,7 +5,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QEvent, QSettings
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication
 
@@ -21,6 +21,22 @@ def qapp() -> QApplication:
     app.setOrganizationName("Rylin512")
     app.setApplicationName("ImageEditTests")
     return app
+
+
+@pytest.fixture(autouse=True)
+def cleanup_qt_widgets(qapp: QApplication) -> Iterator[None]:
+    """Destroy widgets while QApplication is still alive.
+
+    Tests schedule many widgets with ``deleteLater()`` but never run an event
+    loop afterwards. Letting shiboken tear those wrappers down during Python
+    finalization can abort the interpreter (notably with PySide6 on Linux), so
+    flush the deferred deletions after every test instead.
+    """
+    yield
+    for widget in QApplication.topLevelWidgets():
+        widget.deleteLater()
+    QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    qapp.processEvents()
 
 
 @pytest.fixture()
